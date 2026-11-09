@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LCP Token Boundary Detector</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--text:#1b1f2a;--muted:#667085;--border:#e2e5ee;--accent:#4f46e5;
+--kw:#7c3aed;--op:#d97706;--pu:#0891b2;--id:#16a34a;--int:#2563eb;--err:#dc2626;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1117;--card:#181b24;--text:#e8eaf0;--muted:#9aa3b5;--border:#2a2f3d;--accent:#818cf8;
+--kw:#a78bfa;--op:#fbbf24;--pu:#22d3ee;--id:#4ade80;--int:#60a5fa;--err:#f87171;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1117;--card:#181b24;--text:#e8eaf0;--muted:#9aa3b5;--border:#2a2f3d;--accent:#818cf8;
+--kw:#a78bfa;--op:#fbbf24;--pu:#22d3ee;--id:#4ade80;--int:#60a5fa;--err:#f87171;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:24px 16px 40px}
+h1{font-size:1.5rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px;font-size:.92rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px}
+label{font-weight:600;font-size:.9rem}
+textarea{width:100%;margin-top:8px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:15px ui-monospace,Menlo,Consolas,monospace;resize:vertical;min-height:80px}
+textarea:focus{outline:2px solid var(--accent);border-color:transparent}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:center}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);padding:8px 14px}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+button.chip{font-size:.82rem;padding:4px 10px;font-family:ui-monospace,Menlo,monospace}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.74rem;font-weight:700;letter-spacing:.03em;color:#fff;white-space:nowrap}
+.t-KEYWORD{background:var(--kw)}.t-OPERATOR{background:var(--op)}.t-PUNCTUATION{background:var(--pu)}
+.t-IDENTIFIER{background:var(--id)}.t-INTEGER{background:var(--int)}.t-UNRECOGNISED{background:var(--err)}
+.tokens{display:flex;flex-wrap:wrap;gap:6px;font-family:ui-monospace,Menlo,monospace;font-size:.95rem}
+.tok{border:2px solid;border-radius:6px;padding:2px 8px;background:var(--bg)}
+.tok.KEYWORD{border-color:var(--kw)}.tok.OPERATOR{border-color:var(--op)}.tok.PUNCTUATION{border-color:var(--pu)}
+.tok.IDENTIFIER{border-color:var(--id)}.tok.INTEGER{border-color:var(--int)}.tok.UNRECOGNISED{border-color:var(--err)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border)}
+th{color:var(--muted);font-weight:600;font-size:.8rem}
+td.code{font-family:ui-monospace,Menlo,monospace}
+.stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;color:var(--muted);font-size:.85rem}
+.empty{color:var(--muted);font-style:italic}
+details summary{cursor:pointer;font-weight:600}
+.pats{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:.85rem}
+h2{font-size:1rem;margin:0 0 12px}
+</style>
+</head>
+<body>
+<main>
+<h1>LCP Token Boundary Detector</h1>
+<p class="sub">Trie + longest-prefix match + greedy “maximal munch” &middot; DAA Mini Project, Group 3 (Section B)</p>
+
+<div class="card">
+  <label for="inp">Input string</label>
+  <textarea id="inp" spellcheck="false">integer x === 10; int y = x++ + 5;</textarea>
+  <div class="row">
+    <button class="primary" id="go">Tokenize</button>
+    <button id="clr">Clear</button>
+    <span style="color:var(--muted);font-size:.85rem">Examples:</span>
+    <button class="chip" data-ex="integerCount = 5;">integerCount = 5;</button>
+    <button class="chip" data-ex="a<<=b>>c===d">a&lt;&lt;=b&gt;&gt;c===d</button>
+    <button class="chip" data-ex="int main() { x--; y = 3 @ 4; }">int main() {…}</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Token stream</h2>
+  <div id="stream" class="tokens"></div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div class="card">
+  <h2>Output</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>#</th><th>Type</th><th>Lexeme</th><th>Span</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Patterns stored in the trie</summary>
+    <div class="pats" id="pats"></div>
+  </details>
+</div>
+</main>
+
+<script>
+/* ---- Trie (port of the C implementation) ---- */
+function createNode(){return{children:new Map(),isEnd:false,type:""};}
+function insert(root,word,type){
+  let c=root;
+  for(const ch of word){
+    if(!c.children.has(ch)) c.children.set(ch,createNode());
+    c=c.children.get(ch);
+  }
+  c.isEnd=true;c.type=type;
+}
+const isWordChar=ch=>ch!==undefined&&/[A-Za-z0-9_]/.test(ch);
+
+/* Longest prefix match from str[start]; returns {end,type} or null */
+function longestMatch(root,str,start){
+  let curr=root,i=start,last=null;
+  while(i<str.length){
+    const ch=str[i];
+    if(!curr.children.has(ch)) break;
+    curr=curr.children.get(ch);
+    i++;
+    if(curr.isEnd){
+      const wordLike=isWordChar(str[start]);
+      if(wordLike&&isWordChar(str[i])) continue;   /* boundary check fails */
+      last={end:i,type:curr.type};
+    }
+  }
+  return last;
+}
+
+/* Left-to-right scanner */
+function scan(input,root){
+  const out=[];let i=0;const n=input.length;
+  while(i<n){
+    if(/\s/.test(input[i])){i++;continue;}
+    const m=longestMatch(root,input,i);
+    if(m){out.push({type:m.type,text:input.slice(i,m.end),from:i,to:m.end});i=m.end;continue;}
+    if(/[A-Za-z_]/.test(input[i])){
+      let j=i;while(isWordChar(input[j]))j++;
+      out.push({type:"IDENTIFIER",text:input.slice(i,j),from:i,to:j});i=j;continue;
+    }
+    if(/[0-9]/.test(input[i])){
+      let j=i;while(/[0-9]/.test(input[j]||""))j++;
+      out.push({type:"INTEGER",text:input.slice(i,j),from:i,to:j});i=j;continue;
+    }
+    out.push({type:"UNRECOGNISED",text:input[i],from:i,to:i+1});i++;
+  }
+  return out;
+}
+
+/* ---- Build trie with the same patterns as the C code ---- */
+const PATTERNS=[
+ ["int","KEYWORD"],["integer","KEYWORD"],
+ ["=","OPERATOR"],["==","OPERATOR"],["===","OPERATOR"],
+ ["<","OPERATOR"],["<=","OPERATOR"],["<<","OPERATOR"],
+ [">","OPERATOR"],[">=","OPERATOR"],[">>","OPERATOR"],
+ ["+","OPERATOR"],["++","OPERATOR"],["-","OPERATOR"],["--","OPERATOR"],
+ ["*","OPERATOR"],["/","OPERATOR"],
+ ["(","PUNCTUATION"],[")","PUNCTUATION"],["{","PUNCTUATION"],["}","PUNCTUATION"],[";","PUNCTUATION"]
+];
+const root=createNode();
+PATTERNS.forEach(([w,t])=>insert(root,w,t));
+
+/* ---- UI ---- */
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function run(){
+  const toks=scan($("inp").value,root);
+  $("stream").innerHTML=toks.length
+    ?toks.map(t=>`<span class="tok ${t.type}" title="${t.type}">${esc(t.text)}</span>`).join("")
+    :'<span class="empty">No tokens yet.</span>';
+  $("rows").innerHTML=toks.length
+    ?toks.map((t,k)=>`<tr><td>${k+1}</td><td><span class="badge t-${t.type}">${t.type}</span></td><td class="code">${esc(t.text)}</td><td class="code">[${t.from}, ${t.to})</td></tr>`).join("")
+    :'<tr><td colspan="4" class="empty">Enter some input and press Tokenize.</td></tr>';
+  const counts={};toks.forEach(t=>counts[t.type]=(counts[t.type]||0)+1);
+  $("stats").innerHTML=toks.length
+    ?`<span><b>${toks.length}</b> tokens</span>`+Object.entries(counts).map(([k,v])=>`<span><span class="badge t-${k}">${k}</span> ${v}</span>`).join("")
+    :"";
+}
+$("pats").innerHTML=PATTERNS.map(([w,t])=>`<span class="badge t-${t}">${esc(w)}</span>`).join("");
+$("go").onclick=run;
+$("inp").addEventListener("input",run);
+$("inp").addEventListener("keydown",e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();run();}});
+$("clr").onclick=()=>{$("inp").value="";run();$("inp").focus();};
+document.querySelectorAll(".chip").forEach(b=>b.onclick=()=>{$("inp").value=b.dataset.ex;run();});
+run();
+</script>
+</body>
+</html>
